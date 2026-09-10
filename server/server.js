@@ -1,0 +1,116 @@
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Find My Train API is running',
+  });
+});
+
+app.get('/api/train/:number/live', async (req, res) => {
+  try {
+    const { number } = req.params;
+
+    const response = await fetch(
+      `https://api.railradar.in/v1/trains/${number}/live`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.RAILRADAR_API_KEY}`,
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch live train data',
+    });
+  }
+});
+
+app.get('/api/trains/search', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    if (!from || !to) {
+      return res.status(400).json({
+        success: false,
+        message: 'From and To stations are required',
+      });
+    }
+
+    const response = await fetch(
+      `https://api.railradar.in/v1/trains/between/${encodeURIComponent(from)}/${encodeURIComponent(to)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.RAILRADAR_API_KEY}`,
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to search trains',
+    });
+  }
+});
+
+app.get('/api/stations/search', async (req, res) => {
+  try {
+    const { q } = req.query;
+
+    const searchQuery =
+  q.toLowerCase() === 'kollam' ? 'Quilon' : q;
+
+    if (!q) {
+      return res.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    const response = await fetch(
+      `https://api.railradar.in/v1/lookup/search/stations?q=${encodeURIComponent(searchQuery)}&limit=50`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.RAILRADAR_API_KEY}`,
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Station search failed:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to search stations',
+    });
+  }
+});
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+});
