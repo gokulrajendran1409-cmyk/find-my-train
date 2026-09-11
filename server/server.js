@@ -13,6 +13,17 @@ app.get('/', (req, res) => {
     message: 'Find My Train API is running',
   });
 });
+app.post('/api/push-token', (req, res) => {
+  const { token } = req.body;
+
+  console.log('PUSH TOKEN RECEIVED:', token);
+
+  res.json({
+    success: true,
+    message: 'Push token received',
+  });
+});
+
 
 app.get('/api/train/:number/live', async (req, res) => {
   try {
