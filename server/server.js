@@ -102,6 +102,8 @@ app.get('/api/trains/search', async (req, res) => {
   try {
     const { from, to } = req.query;
 
+    console.log('TRAIN SEARCH REQUEST:', { from, to });
+
     if (!from || !to) {
       return res.status(400).json({
         success: false,
@@ -109,22 +111,41 @@ app.get('/api/trains/search', async (req, res) => {
       });
     }
 
-    const response = await fetch(
-      `https://api.railradar.in/v1/trains/between/${encodeURIComponent(from)}/${encodeURIComponent(to)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.RAILRADAR_API_KEY}`,
-        },
-      }
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
-    const data = await response.json();
+    try {
+      const response = await fetch(
+        `https://api.railradar.in/v1/trains/between/${encodeURIComponent(from)}/${encodeURIComponent(to)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.RAILRADAR_API_KEY}`,
+          },
+          signal: controller.signal,
+        }
+      );
 
-    res.status(response.status).json(data);
+      clearTimeout(timeout);
+
+      const data = await response.json();
+
+      console.log('RAILRADAR SEARCH STATUS:', response.status);
+
+      return res.status(response.status).json(data);
+    } catch (error) {
+      clearTimeout(timeout);
+
+      console.error('RAILRADAR SEARCH ERROR:', error);
+
+      return res.status(504).json({
+        success: false,
+        message: 'Train search request timed out or failed',
+      });
+    }
   } catch (error) {
-    console.error(error);
+    console.error('TRAIN SEARCH SERVER ERROR:', error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to search trains',
     });
