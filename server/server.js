@@ -24,6 +24,53 @@ app.post('/api/push-token', (req, res) => {
   });
 });
 
+const trackedTrains = new Map();
+
+app.post('/api/track-train', (req, res) => {
+  console.log('TRACK REQUEST RECEIVED:', req.body);
+
+  const {
+    trainNumber,
+    startStationCode,
+    startStationName,
+    pushToken,
+  } = req.body;
+
+  if (!trainNumber || !startStationCode || !pushToken) {
+    console.log('TRACK REQUEST MISSING DATA:', {
+      trainNumber,
+      startStationCode,
+      startStationName,
+      pushToken,
+    });
+
+    return res.status(400).json({
+      success: false,
+      message: 'trainNumber, startStationCode and pushToken are required',
+    });
+  }
+
+  trackedTrains.set(`${pushToken}:${trainNumber}`, {
+    trainNumber: String(trainNumber),
+    startStationCode,
+    startStationName,
+    pushToken,
+    lastStationCode: null,
+    active: true,
+  });
+
+  console.log('TRACKING STARTED:', {
+    trainNumber,
+    startStationCode,
+    startStationName,
+  });
+
+  return res.json({
+    success: true,
+    message: 'Train tracking started',
+  });
+});
+
 
 app.get('/api/train/:number/live', async (req, res) => {
   try {
