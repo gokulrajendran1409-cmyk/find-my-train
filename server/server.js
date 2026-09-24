@@ -242,6 +242,209 @@ app.get('/api/stations/search', async (req, res) => {
   }
 });
 
+async function checkTrackedTrains() {
+  try {
+    const result = await pool.query(`
+      SELECT
+        id,
+        train_number,
+        start_station_code,
+        start_station_name,
+        push_token,
+        last_station_code
+      FROM tracked_trains
+      WHERE active = TRUE
+    `);
+
+    console.log(
+      `CHECKING ${result.rows.length} ACTIVE TRAIN TRACKING RECORD(S)`
+    );
+
+    for (const tracking of result.rows) {
+      try {
+        const response = await fetch(
+          `https://api.railradar.in/v1/trains/${encodeURIComponent(
+            tracking.train_number
+          )}/live`,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.RAILRADAR_API_KEY}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          console.error(
+            `LIVE API FAILED FOR TRAIN ${tracking.train_number}:`,
+            response.status
+          );
+          continue;
+        }
+
+        const apiResult = await response.json();
+        const liveTrain = apiResult.data ?? apiResult;
+
+        const currentStation =
+          liveTrain.currentLocation?.stationCode;
+
+        const currentStationName =
+          liveTrain.currentLocation?.stationName;
+
+        const nextStationName =
+          liveTrain.nextHalt?.stationName;
+
+        if (!currentStation) {
+          console.log(
+            `NO CURRENT STATION FOR TRAIN ${tracking.train_number}`
+          );
+          continue;
+        }
+
+        console.log(
+          `TRAIN ${tracking.train_number}: CURRENT=${currentStation}`
+        );
+
+        // First check: remember the current station without sending
+        // a duplicate notification for the station where tracking began.
+        if (!tracking.last_station_code) {
+          await pool.query(
+            `
+            UPDATE tracked_trains
+            SET last_station_code = $1
+            WHERE id = $2
+            `,
+            [currentStation, tracking.id]
+          );
+
+          // If the train is already at the user's boarding station,
+          // finish tracking immediately.
+          if (currentStation === tracking.start_station_code) {
+            await sendExpoNotification(
+              tracking.push_token,
+              '🚆 Your boarding station has been reached',
+              `Train ${tracking.train_number} has reached ${tracking.start_station_name}.`,
+              {
+                trainNumber: tracking.train_number,
+                stationCode: currentStation,
+              }
+            );
+
+            await pool.query(
+              `
+              UPDATE tracked_trains
+              SET active = FALSE
+              WHERE id = $1
+              `,
+              [tracking.id]
+            );
+          }
+
+          continue;
+        }
+
+        // No station change.
+        if (currentStation === tracking.last_station_code) {
+          continue;
+        }
+
+        // New station reached.
+        const notificationResult = await sendExpoNotification(
+          tracking.push_token,
+          `🚆 Train reached ${currentStationName || currentStation}`,
+          `Train ${tracking.train_number} has reached ${
+            currentStationName || currentStation
+          }.${
+            nextStationName
+              ? ` Next station: ${nextStationName}.`
+              : ''
+          }`,
+          {
+            trainNumber: tracking.train_number,
+            stationCode: currentStation,
+          }
+        );
+
+        const pushAccepted =
+          notificationResult?.data?.status === 'ok';
+
+        if (pushAccepted) {
+          await pool.query(
+            `
+            UPDATE tracked_trains
+            SET last_station_code = $1
+            WHERE id = $2
+            `,
+            [currentStation, tracking.id]
+          );
+        }
+
+        // Stop when the train reaches the user's journey starting station.
+        if (
+          currentStation === tracking.start_station_code &&
+          pushAccepted
+        ) {
+          await sendExpoNotification(
+            tracking.push_token,
+            '📍 Your boarding station has been reached',
+            `Train ${tracking.train_number} has reached ${tracking.start_station_name}. Your journey can begin.`,
+            {
+              trainNumber: tracking.train_number,
+              stationCode: currentStation,
+            }
+          );
+
+          await pool.query(
+            `
+            UPDATE tracked_trains
+            SET active = FALSE
+            WHERE id = $1
+            `,
+            [tracking.id]
+          );
+
+          console.log(
+            `TRACKING COMPLETED FOR TRAIN ${tracking.train_number}`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `CHECK FAILED FOR TRAIN ${tracking.train_number}:`,
+          error
+        );
+      }
+    }
+  } catch (error) {
+    console.error('TRACKED TRAIN CHECKER ERROR:', error);
+  }
+}
+
+app.get('/api/cron/check-trains', async (req, res) => {
+  try {
+    const cronSecret = req.headers['x-cron-secret'];
+
+    if (!cronSecret || cronSecret !== process.env.CRON_SECRET) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized',
+      });
+    }
+
+    await checkTrackedTrains();
+
+    return res.json({
+      success: true,
+      message: 'Tracked trains checked',
+    });
+  } catch (error) {
+    console.error('CRON CHECK ERROR:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to check tracked trains',
+    });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, '0.0.0.0', () => {
