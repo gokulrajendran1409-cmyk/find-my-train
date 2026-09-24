@@ -83,14 +83,25 @@ app.post('/api/track-train', async (req, res) => {
     });
   }
 
-  trackedTrains.set(`${pushToken}:${trainNumber}`, {
-    trainNumber: String(trainNumber),
+ await pool.query(
+  `
+  INSERT INTO tracked_trains
+    (
+      train_number,
+      start_station_code,
+      start_station_name,
+      push_token,
+      active
+    )
+  VALUES ($1, $2, $3, $4, TRUE)
+  `,
+  [
+    String(trainNumber),
     startStationCode,
     startStationName,
     pushToken,
-    lastStationCode: null,
-    active: true,
-  });
+  ]
+);
 
   console.log('TRACKING STARTED:', {
     trainNumber,
