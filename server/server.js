@@ -24,9 +24,40 @@ app.post('/api/push-token', (req, res) => {
   });
 });
 
+async function sendExpoNotification(pushToken, title, body, data = {}) {
+  try {
+    const response = await fetch(
+      'https://exp.host/--/api/v2/push/send',
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: pushToken,
+          title,
+          body,
+          data,
+        }),
+      }
+    );
+
+    const result = await response.json();
+
+    console.log('EXPO PUSH RESULT:', JSON.stringify(result, null, 2));
+
+    return result;
+  } catch (error) {
+    console.error('EXPO PUSH ERROR:', error);
+    return null;
+  }
+}
+
 const trackedTrains = new Map();
 
-app.post('/api/track-train', (req, res) => {
+app.post('/api/track-train', async (req, res) => {
   console.log('TRACK REQUEST RECEIVED:', req.body);
 
   const {
@@ -64,6 +95,16 @@ app.post('/api/track-train', (req, res) => {
     startStationCode,
     startStationName,
   });
+
+  await sendExpoNotification(
+  pushToken,
+  '🚆 Train Tracking Started',
+  `We are now tracking train ${trainNumber} for ${startStationName}.`,
+  {
+    trainNumber,
+    startStationCode,
+  }
+);
 
   return res.json({
     success: true,
