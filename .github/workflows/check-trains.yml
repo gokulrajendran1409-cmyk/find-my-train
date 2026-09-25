@@ -1,0 +1,20 @@
+name: Check tracked trains
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check-trains:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check tracked trains
+        run: |
+          curl --fail --silent --show-error \
+            --max-time 120 \
+            --retry 2 \
+            --retry-delay 10 \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            https://find-my-train.onrender.com/api/cron/check-trains
