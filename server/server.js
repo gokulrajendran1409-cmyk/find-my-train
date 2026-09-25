@@ -347,65 +347,73 @@ async function checkTrackedTrains() {
           continue;
         }
 
-        // New station reached.
-        const notificationResult = await sendExpoNotification(
-          tracking.push_token,
-          `🚆 Train reached ${currentStationName || currentStation}`,
-          `Train ${tracking.train_number} has reached ${
-            currentStationName || currentStation
-          }.${
-            nextStationName
-              ? ` Next station: ${nextStationName}.`
-              : ''
-          }`,
-          {
-            trainNumber: tracking.train_number,
-            stationCode: currentStation,
-          }
-        );
+      
 
-        const pushAccepted =
-          notificationResult?.data?.status === 'ok';
+       // New station reached.
+if (currentStation === tracking.start_station_code) {
+  const boardingPushResult = await sendExpoNotification(
+    tracking.push_token,
+    '📍 Your boarding station has been reached',
+    `Train ${tracking.train_number} has reached ${tracking.start_station_name}. Your journey can begin.`,
+    {
+      trainNumber: tracking.train_number,
+      stationCode: currentStation,
+    }
+  );
 
-        if (pushAccepted) {
-          await pool.query(
-            `
-            UPDATE tracked_trains
-            SET last_station_code = $1
-            WHERE id = $2
-            `,
-            [currentStation, tracking.id]
-          );
-        }
+  const boardingPushAccepted =
+    boardingPushResult?.data?.status === 'ok';
 
-        // Stop when the train reaches the user's journey starting station.
-        if (
-          currentStation === tracking.start_station_code &&
-          pushAccepted
-        ) {
-          await sendExpoNotification(
-            tracking.push_token,
-            '📍 Your boarding station has been reached',
-            `Train ${tracking.train_number} has reached ${tracking.start_station_name}. Your journey can begin.`,
-            {
-              trainNumber: tracking.train_number,
-              stationCode: currentStation,
-            }
-          );
+  if (boardingPushAccepted) {
+    await pool.query(
+      `
+      UPDATE tracked_trains
+      SET last_station_code = $1,
+          active = FALSE
+      WHERE id = $2
+      `,
+      [currentStation, tracking.id]
+    );
 
-          await pool.query(
-            `
-            UPDATE tracked_trains
-            SET active = FALSE
-            WHERE id = $1
-            `,
-            [tracking.id]
-          );
+    console.log(
+      `TRACKING COMPLETED FOR TRAIN ${tracking.train_number}`
+    );
+  }
 
-          console.log(
-            `TRACKING COMPLETED FOR TRAIN ${tracking.train_number}`
-          );
-        }
+  continue;
+}
+
+const stationPushResult = await sendExpoNotification(
+  tracking.push_token,
+  `🚆 Train reached ${currentStationName || currentStation}`,
+  `Train ${tracking.train_number} has reached ${
+    currentStationName || currentStation
+  }.${
+    nextStationName
+      ? ` Next station: ${nextStationName}.`
+      : ''
+  }`,
+  {
+    trainNumber: tracking.train_number,
+    stationCode: currentStation,
+  }
+);
+
+const stationPushAccepted =
+  stationPushResult?.data?.status === 'ok';
+
+if (stationPushAccepted) {
+  await pool.query(
+    `
+    UPDATE tracked_trains
+    SET last_station_code = $1
+    WHERE id = $2
+    `,
+    [currentStation, tracking.id]
+  );
+}
+
+         
       } catch (error) {
         console.error(
           `CHECK FAILED FOR TRAIN ${tracking.train_number}:`,
