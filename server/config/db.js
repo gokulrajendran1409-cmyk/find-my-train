@@ -1,10 +1,19 @@
 const { Pool } = require('pg');
 
+const databaseUrl = process.env.DATABASE_URL || '';
+
+const isLocalDatabase =
+  databaseUrl.includes('localhost') ||
+  databaseUrl.includes('127.0.0.1');
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  connectionString: databaseUrl,
+
+  // Local PostgreSQL: no SSL
+  // Render/external PostgreSQL: TLS required
+  ssl: isLocalDatabase
+    ? false
+    : { rejectUnauthorized: false },
 });
 
 async function initializeDatabase() {
@@ -21,6 +30,27 @@ async function initializeDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await pool.query(`
+  WITH duplicates AS (
+    SELECT
+      id,
+      ROW_NUMBER() OVER (
+        PARTITION BY train_number, push_token
+        ORDER BY id
+      ) AS row_num
+    FROM tracked_trains
+    WHERE active = TRUE
+  )
+  UPDATE tracked_trains
+  SET active = FALSE
+  WHERE id IN (
+    SELECT id
+    FROM duplicates
+    WHERE row_num > 1
+  );
+`);
+
+console.log('Duplicate tracking records cleaned');
 
     console.log('Database initialized successfully');
   } catch (error) {

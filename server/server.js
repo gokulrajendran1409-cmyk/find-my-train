@@ -83,7 +83,26 @@ app.post('/api/track-train', async (req, res) => {
     });
   }
 
- await pool.query(
+const existingTracking = await pool.query(
+  `
+  SELECT id
+  FROM tracked_trains
+  WHERE train_number = $1
+    AND push_token = $2
+    AND active = TRUE
+  LIMIT 1
+  `,
+  [String(trainNumber), pushToken]
+);
+
+if (existingTracking.rows.length > 0) {
+  return res.json({
+    success: true,
+    message: 'Train is already being tracked',
+  });
+}
+
+await pool.query(
   `
   INSERT INTO tracked_trains
     (
