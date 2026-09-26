@@ -26,7 +26,13 @@ app.post('/api/push-token', (req, res) => {
   });
 });
 
-async function sendExpoNotification(pushToken, title, body, data = {}) {
+async function sendExpoNotification(
+  pushToken,
+  title,
+  body,
+  data = {},
+  categoryId = null
+) {
   try {
     const response = await fetch(
       'https://exp.host/--/api/v2/push/send',
@@ -38,11 +44,12 @@ async function sendExpoNotification(pushToken, title, body, data = {}) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          to: pushToken,
-          title,
-          body,
-          data,
-        }),
+  to: pushToken,
+  title,
+  body,
+  data,
+  ...(categoryId ? { categoryId } : {}),
+}),
       }
     );
 
@@ -83,26 +90,7 @@ app.post('/api/track-train', async (req, res) => {
     });
   }
 
-const existingTracking = await pool.query(
-  `
-  SELECT id
-  FROM tracked_trains
-  WHERE train_number = $1
-    AND push_token = $2
-    AND active = TRUE
-  LIMIT 1
-  `,
-  [String(trainNumber), pushToken]
-);
-
-if (existingTracking.rows.length > 0) {
-  return res.json({
-    success: true,
-    message: 'Train is already being tracked',
-  });
-}
-
-await pool.query(
+const insertResult = await pool.query(
   `
   INSERT INTO tracked_trains
     (
@@ -113,6 +101,7 @@ await pool.query(
       active
     )
   VALUES ($1, $2, $3, $4, TRUE)
+  RETURNING id
   `,
   [
     String(trainNumber),
@@ -122,20 +111,24 @@ await pool.query(
   ]
 );
 
+const trackingId = insertResult.rows[0].id;
   console.log('TRACKING STARTED:', {
     trainNumber,
     startStationCode,
     startStationName,
   });
 
-  await sendExpoNotification(
+await sendExpoNotification(
   pushToken,
   '🚆 Train Tracking Started',
   `We are now tracking train ${trainNumber} for ${startStationName}.`,
-  {
-    trainNumber,
-    startStationCode,
-  }
+ {
+  trainNumber,
+  startStationCode,
+  trackingId,
+  pushToken,
+},
+'TRAIN_TRACKING'
 );
 
   return res.json({
@@ -144,6 +137,53 @@ await pool.query(
   });
 });
 
+app.post('/api/track-train/stop', async (req, res) => {
+  try {
+    const { trackingId, pushToken } = req.body;
+
+    if (!trackingId || !pushToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'trackingId and pushToken are required',
+      });
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE tracked_trains
+      SET active = FALSE
+      WHERE id = $1
+        AND push_token = $2
+        AND active = TRUE
+      RETURNING id, train_number
+      `,
+      [trackingId, pushToken]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Tracking already stopped or not found',
+      });
+    }
+
+    console.log(
+      `TRACKING STOPPED BY USER: TRAIN ${result.rows[0].train_number}`
+    );
+
+    return res.json({
+      success: true,
+      message: 'Train tracking stopped',
+    });
+  } catch (error) {
+    console.error('STOP TRACKING ERROR:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to stop train tracking',
+    });
+  }
+});
 
 app.get('/api/train/:number/live', async (req, res) => {
   try {
@@ -339,14 +379,16 @@ async function checkTrackedTrains() {
           // finish tracking immediately.
           if (currentStation === tracking.start_station_code) {
             await sendExpoNotification(
-              tracking.push_token,
-              '🚆 Your boarding station has been reached',
-              `Train ${tracking.train_number} has reached ${tracking.start_station_name}.`,
-              {
-                trainNumber: tracking.train_number,
-                stationCode: currentStation,
-              }
-            );
+  tracking.push_token,
+  '🚆 Your boarding station has been reached',
+  `Train ${tracking.train_number} has reached ${tracking.start_station_name}.`,
+  {
+    trainNumber: tracking.train_number,
+    stationCode: currentStation,
+    trackingId: tracking.id,
+  },
+  'TRAIN_TRACKING'
+);
 
             await pool.query(
               `
@@ -370,15 +412,18 @@ async function checkTrackedTrains() {
 
        // New station reached.
 if (currentStation === tracking.start_station_code) {
-  const boardingPushResult = await sendExpoNotification(
-    tracking.push_token,
-    '📍 Your boarding station has been reached',
-    `Train ${tracking.train_number} has reached ${tracking.start_station_name}. Your journey can begin.`,
-    {
-      trainNumber: tracking.train_number,
-      stationCode: currentStation,
-    }
-  );
+ const boardingPushResult = await sendExpoNotification(
+  tracking.push_token,
+  '📍 Your boarding station has been reached',
+  `Train ${tracking.train_number} has reached ${tracking.start_station_name}. Your journey can begin.`,
+  {
+  trainNumber: tracking.train_number,
+  stationCode: currentStation,
+  trackingId: tracking.id,
+  pushToken: tracking.push_token,
+},
+  'TRAIN_TRACKING'
+);
 
   const boardingPushAccepted =
     boardingPushResult?.data?.status === 'ok';
@@ -412,10 +457,13 @@ const stationPushResult = await sendExpoNotification(
       ? ` Next station: ${nextStationName}.`
       : ''
   }`,
-  {
-    trainNumber: tracking.train_number,
-    stationCode: currentStation,
-  }
+ {
+  trainNumber: tracking.train_number,
+  stationCode: currentStation,
+  trackingId: tracking.id,
+  pushToken: tracking.push_token,
+},
+  'TRAIN_TRACKING'
 );
 
 const stationPushAccepted =
