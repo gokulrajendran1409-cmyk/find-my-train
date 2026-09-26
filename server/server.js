@@ -148,17 +148,23 @@ app.post('/api/track-train/stop', async (req, res) => {
       });
     }
 
-    const result = await pool.query(
-      `
-      UPDATE tracked_trains
-      SET active = FALSE
-      WHERE id = $1
-        AND push_token = $2
-        AND active = TRUE
-      RETURNING id, train_number
-      `,
-      [trackingId, pushToken]
-    );
+ const result = await pool.query(
+  `
+  UPDATE tracked_trains
+  SET active = FALSE
+  WHERE train_number = (
+    SELECT train_number
+    FROM tracked_trains
+    WHERE id = $1
+      AND push_token = $2
+    LIMIT 1
+  )
+    AND push_token = $2
+    AND active = TRUE
+  RETURNING id, train_number
+  `,
+  [trackingId, pushToken]
+);
 
     if (result.rows.length === 0) {
       return res.json({
@@ -168,8 +174,8 @@ app.post('/api/track-train/stop', async (req, res) => {
     }
 
     console.log(
-      `TRACKING STOPPED BY USER: TRAIN ${result.rows[0].train_number}`
-    );
+  `TRACKING STOPPED BY USER: TRAIN ${result.rows[0].train_number} - STOPPED ${result.rows.length} ACTIVE RECORD(S)`
+);
 
     return res.json({
       success: true,
