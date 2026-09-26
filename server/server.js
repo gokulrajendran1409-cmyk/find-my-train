@@ -362,6 +362,22 @@ async function checkTrackedTrains() {
         console.log(
           `TRAIN ${tracking.train_number}: CURRENT=${currentStation}`
         );
+        const activeCheck = await pool.query(
+  `
+  SELECT 1
+  FROM tracked_trains
+  WHERE id = $1
+    AND active = TRUE
+  `,
+  [tracking.id]
+);
+
+if (activeCheck.rows.length === 0) {
+  console.log(
+    `SKIPPING STOPPED TRACKING: TRAIN ${tracking.train_number}`
+  );
+  continue;
+}
 
         // First check: remember the current station without sending
         // a duplicate notification for the station where tracking began.
